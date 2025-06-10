@@ -2,87 +2,118 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
 
-st.set_page_config(layout="wide", page_title="ARLON Method Application")
+st.set_page_config(layout="wide", page_title="ARLON Method with Fixed Data")
 
-# --- ARLON METODU FONKSİYONU ---
-def run_arlon_method_with_intermediate_results(initial_decision_matrix, criterion_weights, benefit_criteria, cost_criteria, zeta_value):
-    ## Adım 2-2: İki Aşamalı Logaritmik Normalizasyon ve Heron Ortalaması Agregasyonu
+# --- FIXED DATA FROM YOUR FIRST CODE BLOCK ---
+# v_j and p_j values from Table S3 (for calculating criterion weights from MPSI)
+v_j_values = {
+    'C1': 0.3407, 'C2': 0.5468, 'C3': 0.6627, 'C4': 0.4171, 'C5': 0.0701,
+    'C6': 0.3469, 'C7': 0.3658, 'C8': 0.1794, 'C9': 0.3065, 'C10': 0.1969
+}
+p_j_values = {
+    'C1': 4.4499, 'C2': 4.3343, 'C3': 4.0669, 'C4': 2.3679, 'C5': 1.0406,
+    'C6': 4.6405, 'C7': 2.3722, 'C8': 1.2492, 'C9': 2.1399, 'C10': 1.4559
+}
 
-    # Ensure all values in the decision matrix are positive for logarithm operations
-    if (initial_decision_matrix <= 0).any().any():
-        st.error("Decision matrix contains zero or negative values. Logarithm cannot be applied. Please ensure all performance values are positive.")
-        st.stop()
+# Normalized decision matrix using Heron mean from Table S4 (example data)
+normalized_heron_mean_data = {
+    'Countries': ['Algeria', 'Angola', 'Argentina', 'Australia', 'Bahrain', 'Bangladesh', 'Belgium', 'Benin', 'Brazil', 'Bulgaria'],
+    'C1': [0.0113, 0.0121, 0.0119, 0.0140, 0.0090, 0.0097, 0.0175, 0.0127, 0.0138, 0.0081],
+    'C2': [0.0117, 0.0121, 0.0131, 0.0136, 0.0126, 0.0127, 0.0146, 0.0105, 0.0141, 0.0131],
+    'C3': [0.0127, 0.0113, 0.0124, 0.0142, 0.0122, 0.0130, 0.0133, 0.0116, 0.0138, 0.0133],
+    'C4': [0.2936, 0.2936, 0.3016, 0.3000, 0.3000, 0.2946, 0.3033, 0.3043, 0.3102, 0.3064],
+    'C5': [0.2972, 0.2974, 0.3083, 0.3115, 0.3066, 0.3026, 0.3108, 0.3014, 0.3072, 0.3087],
+    'C6': [0.3058, 0.3043, 0.3026, 0.3072, 0.3055, 0.3058, 0.3063, 0.3073, 0.3030, 0.3054],
+    'C7': [0.3041, 0.3064, 0.3053, 0.3079, 0.3065, 0.3060, 0.3055, 0.3052, 0.3064, 0.3059],
+    'C8': [0.3038, 0.3071, 0.3051, 0.3078, 0.3064, 0.3059, 0.3057, 0.3049, 0.3062, 0.3057],
+    'C9': [0.3076, 0.3050, 0.3059, 0.3066, 0.3068, 0.3091, 0.3058, 0.3042, 0.3053, 0.3056],
+    'C10': [0.3075, 0.3049, 0.3057, 0.3065, 0.3067, 0.3092, 0.3058, 0.3040, 0.3052, 0.3056]
+}
+# IMPORTANT: Your first code block uses 'normalized_heron_mean_df' as the input to the ARLON
+# weighted aggregation step. This means the normalization step (2-2) of ARLON is skipped in
+# this specific scenario, as the data is *already* normalized by Heron Mean.
+# If you intend to perform the full ARLON normalization (logarithmic normalization + Heron Mean)
+# on *raw* data, you would need to provide a raw decision matrix here instead.
+# For this request, we'll use 'normalized_heron_mean_df' as the starting point for ARLON's
+# weighted aggregation as per your provided first code block.
+initial_decision_matrix_fixed = pd.DataFrame(normalized_heron_mean_data).set_index('Countries')
 
-    normalized_log1_df = pd.DataFrame(index=initial_decision_matrix.index, columns=initial_decision_matrix.columns)
-    for col in initial_decision_matrix.columns:
-        prod_xij = initial_decision_matrix[col].prod()
-        # Handle cases where prod_xij might be 1 (if all xij for a criterion are 1) to avoid log(1)=0 division error
-        if prod_xij == 1 and (col in benefit_criteria or (col in cost_criteria and len(initial_decision_matrix) - 1 == 0)):
-             st.warning(f"Kriter '{col}' için tüm alternatif değerleri 1 olduğu için logaritma tabanı sıfır olabilir. Bu kriter için normalizasyon 1 olarak ayarlandı.")
-             normalized_log1_df[col] = 1.0 # Or appropriate handling if all values are 1
-             continue # Skip to next column
+# Criterion types
+# C1, C2, C3 are benefit criteria, others are cost criteria
+benefit_criteria_fixed = ['C1', 'C2', 'C3']
+cost_criteria_fixed = ['C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10']
 
-        if col in benefit_criteria:
-            normalized_log1_df[col] = np.log(initial_decision_matrix[col]) / np.log(prod_xij)
-        elif col in cost_criteria:
-            m = len(initial_decision_matrix)
-            # Avoid division by zero if m-1 is zero (i.e., only one alternative)
-            if m - 1 == 0:
-                normalized_log1_df[col] = 1 - (np.log(initial_decision_matrix[col])) # Only one alternative, so prod_xij is xij itself. This simplifies the formula.
-            else:
-                normalized_log1_df[col] = 1 - (np.log(initial_decision_matrix[col]) / (np.log(prod_xij) * (m - 1)))
+# --- MPSI Weighting (Step 1 of your original script) ---
+sum_pj = sum(p_j_values.values())
+criterion_weights_fixed = {k: v / sum_pj for k, v in p_j_values.items()}
+criterion_weights_series_fixed = pd.Series(criterion_weights_fixed)
 
+# --- ARLON METHOD FUNCTION (Adapted to take already normalized data) ---
+def run_arlon_method_with_fixed_data(normalized_heron_mean_df, criterion_weights, benefit_criteria, cost_criteria, zeta_value=0.5):
+    """
+    Executes the ARLON MCDM method starting from *already Heron-mean normalized* data.
+    This skips the initial logarithmic normalization steps (2-2) of the full ARLON method,
+    as the input is assumed to be `ℏnorm_ij` from the paper.
 
-    normalized_log2_df = pd.DataFrame(index=initial_decision_matrix.index, columns=initial_decision_matrix.columns)
-    for col in initial_decision_matrix.columns:
-        sum_log2_xij = np.log2(initial_decision_matrix[col]).sum()
-        # Handle cases where sum_log2_xij might be 0 (e.g., if all xij for a criterion are 1)
-        if sum_log2_xij == 0:
-            st.warning(f"Kriter '{col}' için log2 toplamı sıfır olduğu için bu kriterin normalizasyonu 1 olarak ayarlandı.")
-            normalized_log2_df[col] = 1.0 # Or appropriate handling
-            continue # Skip to next column
+    Args:
+        normalized_heron_mean_df (pd.DataFrame): The Heron-mean normalized decision matrix (ℏnorm_ij).
+        criterion_weights (pd.Series): Normalized weights for each criterion.
+        benefit_criteria (list): List of column names (criteria) that are of 'Benefit' type.
+        cost_criteria (list): List of column names (criteria) that are of 'Cost' type.
+        zeta_value (float): Zeta (ζ) is used in the full ARLON for combining two logarithmic normalizations.
+                            Since the input is already Heron mean, this parameter is not directly
+                            applied in the *provided fixed data's ARLON calculation path*.
+                            However, we keep it for consistency if one were to re-implement full ARLON.
 
-        if col in benefit_criteria:
-            normalized_log2_df[col] = np.log2(initial_decision_matrix[col]) / sum_log2_xij
-        elif col in cost_criteria:
-            normalized_log2_df[col] = 1 - (np.log2(initial_decision_matrix[col]) / sum_log2_xij)
+    Returns:
+        tuple: A tuple containing:
+            - final_ranking (pd.DataFrame): DataFrame with final scores and rankings.
+            - weighted_aggregated_normalized_df (pd.DataFrame): Intermediate matrix after applying weights.
+            - cost_benefit_sums (pd.DataFrame): Intermediate DataFrame with summed cost and benefit values.
+    """
+    # In your original script, `normalized_heron_mean_df` is directly used for weighted aggregation.
+    # This implies that the 'normalization' (steps 2-2) is considered already done for this input.
+    # So, we'll use `normalized_heron_mean_df` as `aggregated_normalized_df` for the next step.
+    aggregated_normalized_df_for_weighting = normalized_heron_mean_df.copy()
 
-    aggregated_normalized_df = pd.DataFrame(index=initial_decision_matrix.index, columns=initial_decision_matrix.columns)
-    for col in initial_decision_matrix.columns:
-        A = normalized_log1_df[col]
-        B = normalized_log2_df[col]
-        # Use np.maximum(0, ...) to handle potential floating point inaccuracies leading to slightly negative values
-        aggregated_normalized_df[col] = ((1 - zeta_value) * np.sqrt(np.maximum(0, A * B))) + (zeta_value * ((A + B) / 2))
-
-    ## Adım 2-3: Ağırlıklı Agregasyon (Weighted Aggegated Normalization)
-    weighted_aggregated_normalized_df = aggregated_normalized_df.copy()
-    for col in aggregated_normalized_df.columns:
+    ## ARLON Method Step 2-3: Weighted Aggregation
+    # Formula: ̂ℏ_ij = (w_j * ℏnorm_ij)
+    weighted_aggregated_normalized_df = aggregated_normalized_df_for_weighting.copy()
+    for col in aggregated_normalized_df_for_weighting.columns:
         if col in criterion_weights.index:
-            weighted_aggregated_normalized_df[col] = aggregated_normalized_df[col] * criterion_weights[col]
+            weighted_aggregated_normalized_df[col] = aggregated_normalized_df_for_weighting[col] * criterion_weights[col]
+        else:
+            # Handle cases where a criterion in the matrix might not have a weight (should ideally not happen with fixed data)
+            st.warning(f"Kriter '{col}' için ağırlık bulunamadı. Bu kriter ağırlıklandırılmayacaktır.")
+            weighted_aggregated_normalized_df[col] = aggregated_normalized_df_for_weighting[col]
 
-    ## Adım 2-4: Maliyet ve Fayda Kriterlerinin Ayrı Ayrı Toplanması
-    # Ensure cost_criteria and benefit_criteria are subsets of initial_decision_matrix.columns
+
+    ## ARLON Method Step 2-4: Separate Summation of Cost and Benefit Criteria
+    # Formula: ℂ_i = ∑_{j∈C} ̂ℏ_ij (Sum of Cost Criteria)
+    # Formula: B_i = ∑_{j∈B} ̂ℏ_ij (Sum of Benefit Criteria)
+
     current_cost_criteria = [c for c in cost_criteria if c in weighted_aggregated_normalized_df.columns]
     current_benefit_criteria = [c for c in benefit_criteria if c in weighted_aggregated_normalized_df.columns]
 
-    cost_sums = weighted_aggregated_normalized_df[current_cost_criteria].sum(axis=1) if current_cost_criteria else pd.Series(0.0, index=initial_decision_matrix.index)
-    benefit_sums = weighted_aggregated_normalized_df[current_benefit_criteria].sum(axis=1) if current_benefit_criteria else pd.Series(0.0, index=initial_decision_matrix.index)
+    cost_sums = weighted_aggregated_normalized_df[current_cost_criteria].sum(axis=1) if current_cost_criteria else pd.Series(0.0, index=normalized_heron_mean_df.index)
+    benefit_sums = weighted_aggregated_normalized_df[current_benefit_criteria].sum(axis=1) if current_benefit_criteria else pd.Series(0.0, index=normalized_heron_mean_df.index)
 
     result_df = pd.DataFrame({
         'Cost_Sum (ℂ_i)': cost_sums,
         'Benefit_Sum (B_i)': benefit_sums
-    }, index=initial_decision_matrix.index)
+    }, index=normalized_heron_mean_df.index)
 
-    ## Adım 2-5: Alternatiflerin Nihai Sıralaması
+    ## ARLON Method Step 2-5: Final Ranking of Alternatives
+    # Formula: ℝ_i = B_i^ψ + ℂ_i^(1-ψ)
+    # ψ (psi) value: (number of benefit criteria) / (total number of criteria)
     total_criteria_count = len(current_benefit_criteria) + len(current_cost_criteria)
     if total_criteria_count == 0:
-        psi_value = 0.5 # Default or handle as error if no criteria selected
+        psi_value = 0.5 # Default if no criteria defined
+        st.warning("Hiç kriter tanımlanmadığı için psi değeri varsayılan olarak 0.5 olarak ayarlandı.")
     else:
         psi_value = len(current_benefit_criteria) / total_criteria_count
 
-    # Handle cases where benefit_sums or cost_sums might be zero leading to log(0)
     final_ranking_scores = []
     for idx in result_df.index:
         b_i = result_df.loc[idx, 'Benefit_Sum (B_i)']
@@ -96,183 +127,81 @@ def run_arlon_method_with_intermediate_results(initial_decision_matrix, criterio
 
     result_df['Final_Ranking_Score (ℝ_i)'] = final_ranking_scores
 
+    # Sort alternatives by final ranking score (higher score means better performance)
     final_ranking = result_df.sort_values(by='Final_Ranking_Score (ℝ_i)', ascending=False)
     final_ranking['Ranking'] = np.arange(1, len(final_ranking) + 1)
 
-    return final_ranking[['Final_Ranking_Score (ℝ_i)', 'Ranking']], normalized_log1_df, normalized_log2_df, aggregated_normalized_df, weighted_aggregated_normalized_df, result_df[['Cost_Sum (ℂ_i)', 'Benefit_Sum (B_i)']]
+    return final_ranking[['Final_Ranking_Score (ℝ_i)', 'Ranking']], weighted_aggregated_normalized_df, result_df[['Cost_Sum (ℂ_i)', 'Benefit_Sum (B_i)']]
 
-# --- STREAMLIT UYGULAMASI BAŞLANGICI ---
-st.title("ARLON Çok Kriterli Karar Verme Yöntemi")
-st.markdown("Bu uygulama, ARLON (Average Relative Logarithm Normalization) yöntemini kullanarak alternatifleri değerlendirmenizi ve sıralamanızı sağlar.")
+# --- STREAMLIT APPLICATION START ---
+st.title("ARLON Çok Kriterli Karar Verme Yöntemi (Sabit Veri)")
+st.markdown("""
+Bu uygulama, sağladığınız **sabit veri setini** kullanarak ARLON (Average Relative Logarithm Normalization) yöntemini uygular. 
+Kriter ağırlıkları ve başlangıç matrisi sağlanan veriden doğrudan alınmıştır.
+""")
 
-# --- DİNAMİK VERİ GİRİŞİ ---
-st.header("1. Veri Girişi")
+st.header("1. Sabit Veri Seti")
 
-# Alternatifler
-st.subheader("Alternatifler")
-num_alternatives = st.number_input("Değerlendirmek istediğiniz alternatif sayısı:", min_value=1, value=3, step=1)
-alternatives = []
-for i in range(num_alternatives):
-    alt_name = st.text_input(f"Alternatif {i+1} Adı:", value=f"Alternatif {i+1}")
-    alternatives.append(alt_name)
+# Display Fixed Criterion Weights
+st.subheader("Kriter Ağırlıkları (MPSI'dan Hesaplandı)")
+st.dataframe(pd.DataFrame({'Kriter': criterion_weights_series_fixed.index, 'Ağırlık': criterion_weights_series_fixed.values}).set_index('Kriter').T, use_container_width=True)
 
-# Kriterler
-st.subheader("Kriterler")
-num_criteria = st.number_input("Değerlendirme kriteri sayısı:", min_value=1, value=9, step=1) # Default 9 kriter
-criteria = []
-criterion_types = {}
-for i in range(num_criteria):
-    col1, col2 = st.columns(2)
-    with col1:
-        # Changed: Removed default_crit_name and default_crit_type
-        crit_name = st.text_input(f"Kriter {i+1} Adı:", value="", key=f"crit_name_{i}") # Value is empty
-        if crit_name:
-            criteria.append(crit_name)
-    with col2:
-        crit_type = st.radio(f"Kriter '{crit_name}' Tipi:", ('Fayda', 'Maliyet'), index=0, key=f"crit_type_{i}") # Default to 'Fayda'
-        criterion_types[crit_name] = crit_type
+# Display Fixed Normalized Heron Mean Decision Matrix
+st.subheader("Heron Ortalaması ile Normalize Edilmiş Karar Matrisi")
+st.dataframe(initial_decision_matrix_fixed, use_container_width=True)
 
-benefit_criteria = [c for c, t in criterion_types.items() if t == 'Fayda']
-cost_criteria = [c for c, t in criterion_types.items() if t == 'Maliyet']
-
-# Kriter Ağırlıkları
-st.subheader("Kriter Ağırlıkları (toplamı 1'e yakın olmak üzere otomatik normalize edilecektir)")
-st.info("Kriter ağırlıklarını daha fazla ondalık hane hassasiyetiyle girebilirsiniz.")
-criterion_weights_input = {}
-if criteria:
-    weight_cols = st.columns(len(criteria))
-    # Removed: original_criterion_raw_scores and calculated_avg_weights
-    for i, crit in enumerate(criteria):
-        with weight_cols[i]:
-            # Changed: Default weight value is now a simple calculation, not based on previous data
-            default_weight_value = 1.0 / len(criteria)
-            weight = st.number_input(
-                f"{crit} Ağırlığı:",
-                min_value=0.0,
-                max_value=100.0,
-                value=float(default_weight_value), # Default to even distribution
-                step=0.000001,
-                format="%.6f",
-                key=f"weight_{crit}"
-            )
-            criterion_weights_input[crit] = weight
-else:
-    st.warning("Lütfen önce kriterleri giriniz.")
-
-# Kriter ağırlıklarını normalize et
-if criterion_weights_input:
-    sum_weights = sum(criterion_weights_input.values())
-    if sum_weights > 0:
-        criterion_weights_normalized = {k: v / sum_weights for k, v in criterion_weights_input.items()}
-        criterion_weights_series = pd.Series(criterion_weights_normalized)
-        st.info(f"Girilen ağırlıkların toplamı: {sum_weights:.6f}. Ağırlıklar otomatik olarak normalize edildi.")
-        st.dataframe(pd.DataFrame({'Kriter': criterion_weights_series.index, 'Normalize Ağırlık': criterion_weights_series.values}).set_index('Kriter').T, use_container_width=True)
-
-    else:
-        st.warning("Kriter ağırlıklarının toplamı sıfır olamaz. Lütfen pozitif değerler girin.")
-        criterion_weights_series = pd.Series()
-else:
-    criterion_weights_series = pd.Series()
-
-
-# Karar Matrisi
-st.subheader("Karar Matrisi (Alternatiflerin Kriterlere Göre Performans Değerleri)")
-st.markdown("Her bir alternatif için her bir kriterdeki performans değerini giriniz. Hassasiyet için daha fazla ondalık hane kullanabilirsiniz.")
-
-if alternatives and criteria:
-    # Removed: original_company_raw_scores and the logic to calculate initial_df based on averages.
-    # Now, initial_df will be filled with zeros or an empty DataFrame if no criteria/alternatives yet.
-    df_data = {crit: [0.0] * len(alternatives) for crit in criteria} # Initialize with zeros
-    initial_df = pd.DataFrame(df_data, index=alternatives)
-
-
-    # Karar matrisi sütun yapılandırması - Hassasiyeti artır
-    column_configuration = {}
-    for crit in criteria:
-        column_configuration[crit] = st.column_config.NumberColumn(
-            label=crit,
-            format="%.6f",
-            min_value=0.0,
-            # No max_value set, allowing user to input any positive value
-        )
-
-    edited_df = st.data_editor(
-        initial_df,
-        num_rows="dynamic",
-        use_container_width=True,
-        hide_index=False,
-        column_config=column_configuration
-    )
-    initial_decision_matrix = edited_df
-else:
-    st.warning("Lütfen önce alternatifleri ve kriterleri giriniz.")
-    initial_decision_matrix = pd.DataFrame()
-
-
-# Zeta Değeri
-st.subheader("Zeta (ζ) Değeri")
-default_zeta = st.slider("Heron Ortalaması için Zeta (ζ) Değeri:", min_value=0.0, max_value=1.0, value=0.5, step=0.01)
+# Display Criterion Types
+st.subheader("Kriter Tipleri")
+st.write(f"**Fayda Kriterleri:** {', '.join(benefit_criteria_fixed)}")
+st.write(f"**Maliyet Kriterleri:** {', '.join(cost_criteria_fixed)}")
 
 st.markdown("---")
 
-# --- ARLON YÖNTEMİNİ ÇALIŞTIR ---
-if st.button("ARLON Analizini Başlat") and not initial_decision_matrix.empty and not criterion_weights_series.empty:
-    st.header("2. ARLON Analiz Sonuçları")
+# --- RUN ARLON METHOD ---
+st.header("2. ARLON Analiz Sonuçları")
 
-    try:
-        # ARLON metodunu çalıştır
-        final_ranking_default_zeta, norm1_df, norm2_df, agg_norm_df, weighted_agg_norm_df, cost_benefit_sums = run_arlon_method_with_intermediate_results(
-            initial_decision_matrix, criterion_weights_series, benefit_criteria, cost_criteria, default_zeta
-        )
+# ARLON Method with fixed data (no dynamic zeta slider as it's not applied to already normalized data in this setup)
+# For the purpose of displaying intermediate steps, we'll slightly adjust the function's return for clarity.
+# Since your initial script directly takes `normalized_heron_mean_df` and applies weights,
+# we are simulating step 2-3 onwards from the ARLON method.
+try:
+    final_ranking, weighted_agg_norm_df, cost_benefit_sums = run_arlon_method_with_fixed_data(
+        initial_decision_matrix_fixed, criterion_weights_series_fixed, benefit_criteria_fixed, cost_criteria_fixed
+    )
 
-        st.subheader(f"Alternatiflerin Nihai ARLON Sıralaması (Zeta = {default_zeta})")
-        st.dataframe(final_ranking_default_zeta.rename(columns={'Final_Ranking_Score (ℝ_i)': 'ARLON Skoru', 'Ranking': 'Sıralama'}), use_container_width=True)
+    st.subheader("Alternatiflerin Nihai ARLON Sıralaması")
+    st.dataframe(final_ranking.rename(columns={'Final_Ranking_Score (ℝ_i)': 'ARLON Skoru', 'Ranking': 'Sıralama'}), use_container_width=True)
 
-        st.markdown("---")
+    st.markdown("---")
 
-        st.subheader("Ara Sonuçlar")
+    st.subheader("Ara Sonuçlar")
 
-        st.markdown("#### Logaritmik Normalizasyon Matrisi (İlk Aşama - $x_{ij}^{(1)}$)")
-        st.markdown("Bu tablo, ARLON metodunun ilk logaritmik normalizasyon adımından sonra elde edilen $x_{ij}^{(1)}$ değerlerini göstermektedir (Eq. 9 ve Eq. 10).")
-        st.dataframe(norm1_df, use_container_width=True)
+    # The fixed data `normalized_heron_mean_df` is already the output of Heron Mean aggregation,
+    # so we'll display it here as the base for weighted aggregation.
+    st.markdown("#### Heron Ortalaması Agregasyon Matrisi (Başlangıç Verisi)")
+    st.markdown("Bu, analize başlanan, Heron ortalaması ile normalize edilmiş başlangıç matrisidir (̂ℏnorm_ij).")
+    st.dataframe(initial_decision_matrix_fixed, use_container_width=True)
 
-        st.markdown("#### Logaritmik Normalizasyon Matrisi (İkinci Aşama - $x_{ij}^{(2)}$)")
-        st.dataframe(norm2_df, use_container_width=True)
 
-        st.markdown("#### Heron Ortalaması Agregasyon Matrisi ($x_{ij}^{(3)}$)")
-        st.dataframe(agg_norm_df, use_container_width=True)
+    st.markdown("#### Ağırlıklı Normalleştirilmiş Karar Matrisi (̂ℏ_ij)")
+    st.markdown("Bu tablo, Heron ortalaması ile birleştirilmiş normalize edilmiş değerlerin, kriter ağırlıkları ile çarpılması sonucunda elde edilen ̂ℏ_ij değerlerini göstermektedir.")
+    st.dataframe(weighted_agg_norm_df, use_container_width=True)
 
-        st.markdown("#### Ağırlıklı Normalleştirilmiş Karar Matrisi")
-        st.dataframe(weighted_agg_norm_df, use_container_width=True)
+    st.markdown("#### Fayda ve Maliyet Toplamları ($B_i$ ve $C_i$)")
+    st.markdown("Bu tablo, alternatifler için fayda ($B_i$) ve maliyet ($C_i$) kriterlerinin ağırlıklı toplamlarını göstermektedir.")
+    st.dataframe(cost_benefit_sums, use_container_width=True)
 
-        st.markdown("#### Fayda ve Maliyet Toplamları ($B_i$ ve $C_i$)")
-        st.dataframe(cost_benefit_sums, use_container_width=True)
+    st.markdown("---")
 
-        st.markdown("---")
+    st.subheader("Sıralama Özeti")
+    st.write("**:green[En iyi 3 ülke:]**")
+    st.dataframe(final_ranking.head(3), use_container_width=True)
+    st.write("**:red[En kötü 3 ülke:]**")
+    st.dataframe(final_ranking.tail(3), use_container_width=True)
 
-        st.subheader("Farklı Zeta Değerleri İçin Hassasiyet Analizi")
-        zeta_values = np.linspace(0.0, 1.0, 11) # 0.0'dan 1.0'a 0.1 aralıklarla
-        multi_zeta_results_df = pd.DataFrame(index=initial_decision_matrix.index)
-        for zeta_val in zeta_values:
-            zeta_results, _, _, _, _, _ = run_arlon_method_with_intermediate_results(initial_decision_matrix, criterion_weights_series, benefit_criteria, cost_criteria, zeta_val)
-            multi_zeta_results_df[f'Zeta={zeta_val:.1f}'] = zeta_results['Final_Ranking_Score (ℝ_i)']
+    # Sensitivity analysis with Zeta is not applicable here as the input is already normalized with Heron Mean.
+    # If you had raw data, you'd perform the full ARLON which involves Zeta.
+    st.info("Bu uygulama, sağlanan sabit veri seti için ARLON yöntemini kullanmaktadır. Bu veri seti zaten Heron ortalaması ile normalize edildiğinden, Zeta (ζ) değeri için hassasiyet analizi bu bağlamda uygulanmamaktadır.")
 
-        st.dataframe(multi_zeta_results_df, use_container_width=True)
-
-        st.subheader("Zeta Değerlerine Göre Alternatif Skorlarının Değişimi")
-        fig, ax = plt.subplots(figsize=(10, 6))
-        multi_zeta_results_df.T.plot(ax=ax, marker='o')
-        ax.set_title('Zeta Değerine Göre ARLON Skorlarının Değişimi')
-        ax.set_xlabel('Zeta Değeri')
-        ax.set_ylabel('ARLON Skoru')
-        ax.grid(True)
-        ax.legend(title='Alternatifler', bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.tight_layout()
-        st.pyplot(fig)
-
-    except ValueError as e:
-        st.error(f"Hesaplama Hatası: {e}")
-    except Exception as e:
-        st.error(f"Beklenmedik bir hata oluştu: {e}")
-else:
-    st.info("Lütfen tüm veri girişlerini tamamlayın ve 'ARLON Analizini Başlat' butonuna tıklayın.")
+except Exception as e:
+    st.error(f"ARLON analizi sırasında bir hata oluştu: {e}. Lütfen sağlanan sabit verileri kontrol edin.")
